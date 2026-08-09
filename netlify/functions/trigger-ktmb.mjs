@@ -1,5 +1,5 @@
 export default async () => {
-  const token = Netlify.env.get('GITHUB_WORKFLOW_TOKEN');
+  const token = process.env.GITHUB_WORKFLOW_TOKEN;
 
   if (!token) {
     throw new Error('Missing Netlify environment variable: GITHUB_WORKFLOW_TOKEN');
@@ -10,8 +10,8 @@ export default async () => {
     {
       method: 'POST',
       headers: {
-        'Accept': 'application/vnd.github+json',
-        'Authorization': `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${token}`,
         'X-GitHub-Api-Version': '2022-11-28',
         'User-Agent': 'ktmb-seat-monitor-netlify-scheduler'
       },
