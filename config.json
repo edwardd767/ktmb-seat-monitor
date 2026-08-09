@@ -4,6 +4,6 @@
   "travelDate": "2026-08-31",
   "passengers": 1,
   "trains": ["9045", "9049", "9011", "9055"],
-  "alertWhenSeatsGreaterThan": 3,
+  "alertWhenSeatsGreaterThan": 2,
   "ktmbUrl": "https://online.ktmb.com.my/"
 }
