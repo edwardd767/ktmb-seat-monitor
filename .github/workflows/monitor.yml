@@ -2,6 +2,15 @@ name: KTMB Seat Monitor
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'monitor.mjs'
+      - 'config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/monitor.yml'
   schedule:
     # Every 5 minutes, offset from the top of the hour to reduce peak-load delays.
     - cron: '3,8,13,18,23,28,33,38,43,48,53,58 * * * *'
