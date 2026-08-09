@@ -1,12 +1,12 @@
 {
   "name": "ktmb-seat-monitor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "KTMB ETS/Intercity seat availability monitor using GitHub Actions and Playwright.",
   "scripts": {
-    "monitor": "node monitor.mjs",
-    "test": "node monitor.mjs"
+    "monitor": "node monitor-v2.mjs",
+    "test": "node monitor-v2.mjs"
   },
   "dependencies": {
     "nodemailer": "^7.0.5",
