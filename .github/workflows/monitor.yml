@@ -6,15 +6,12 @@ on:
     branches:
       - main
     paths:
-      - 'monitor.mjs'
       - 'monitor-v2.mjs'
       - 'config.json'
       - 'package.json'
       - 'package-lock.json'
-      - 'email-test-trigger.txt'
       - '.github/workflows/monitor.yml'
   schedule:
-    # Every 5 minutes, offset from the top of the hour to reduce peak-load delays.
     - cron: '3,8,13,18,23,28,33,38,43,48,53,58 * * * *'
 
 permissions:
@@ -25,60 +22,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  test-email:
-    if: github.event_name == 'push' && github.event.head_commit.message == 'test: send notification email'
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Send KTMB test email
-        env:
-          SMTP_PASS: ${{ secrets.SMTP_PASS }}
-        run: |
-          node --input-type=module <<'NODE'
-          import nodemailer from 'nodemailer';
-
-          const transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 465,
-            secure: true,
-            auth: {
-              user: 'edwardjacob721@gmail.com',
-              pass: process.env.SMTP_PASS
-            }
-          });
-
-          await transporter.sendMail({
-            from: 'edwardjacob721@gmail.com',
-            to: 'edwardjacob721@gmail.com',
-            subject: 'KTMB Seat Monitor - Test Notification',
-            text: [
-              'KTMB Seat Monitor test notification',
-              '',
-              'This is a test email to confirm that your KTMB seat availability notifications are working.',
-              '',
-              'Monitoring: IPOH → KL SENTRAL',
-              'Travel date: 31 Aug 2026',
-              'Alert condition: 4 seats or more',
-              '',
-              'When a monitored train reaches the alert condition, you will receive an email notification automatically.'
-            ].join('\n')
-          });
-
-          console.log('KTMB test email sent successfully to edwardjacob721@gmail.com');
-          NODE
-
   check-seats:
     runs-on: ubuntu-latest
     timeout-minutes: 8
