@@ -37,12 +37,12 @@ jobs:
 
       - name: Check KTMB seats
         env:
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_HOST: smtp.gmail.com
+          SMTP_PORT: '465'
+          SMTP_USER: edwardjacob721@gmail.com
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
-          ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
+          ALERT_EMAIL_TO: edwardjacob721@gmail.com
+          ALERT_EMAIL_FROM: edwardjacob721@gmail.com
         run: npm run monitor
 
       - name: Save alert state
