@@ -75,9 +75,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
-      - name: Wait 5 minutes before next check
+      - name: Wait before next check
         if: always()
-        run: sleep 300
+        run: sleep 240
 
       - name: Trigger next KTMB check
         if: always()
