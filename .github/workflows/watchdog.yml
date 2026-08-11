@@ -1,0 +1,92 @@
+name: KTMB Seat Monitor Watchdog
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '7,17,27,37,47,57 * * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: ktmb-seat-monitor-watchdog
+  cancel-in-progress: true
+
+jobs:
+  restart-if-stalled:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check monitor health and restart if needed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          RUNS_URL="https://api.github.com/repos/${{ github.repository }}/actions/workflows/monitor.yml/runs?branch=main&per_page=5"
+          DISPATCH_URL="https://api.github.com/repos/${{ github.repository }}/actions/workflows/monitor.yml/dispatches"
+
+          RESPONSE=$(curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$RUNS_URL")
+
+          LATEST_CREATED=$(echo "$RESPONSE" | jq -r '.workflow_runs[0].created_at // empty')
+          LATEST_STATUS=$(echo "$RESPONSE" | jq -r '.workflow_runs[0].status // "none"')
+          LATEST_CONCLUSION=$(echo "$RESPONSE" | jq -r '.workflow_runs[0].conclusion // "none"')
+
+          NEED_RESTART=0
+
+          if [[ -z "$LATEST_CREATED" ]]; then
+            echo "No KTMB monitor run found. Restart is required."
+            NEED_RESTART=1
+          else
+            NOW_EPOCH=$(date -u +%s)
+            LATEST_EPOCH=$(date -u -d "$LATEST_CREATED" +%s)
+            AGE_SECONDS=$((NOW_EPOCH - LATEST_EPOCH))
+
+            echo "Latest monitor run: $LATEST_CREATED"
+            echo "Status: $LATEST_STATUS"
+            echo "Conclusion: $LATEST_CONCLUSION"
+            echo "Age: ${AGE_SECONDS}s"
+
+            if [[ "$AGE_SECONDS" -gt 720 ]]; then
+              echo "Latest monitor run is older than 12 minutes. Restart is required."
+              NEED_RESTART=1
+            fi
+          fi
+
+          if [[ "$NEED_RESTART" -eq 0 ]]; then
+            echo "KTMB monitor is healthy. No restart required."
+            exit 0
+          fi
+
+          SUCCESS=0
+          for ATTEMPT in 1 2 3 4 5; do
+            echo "Watchdog dispatch attempt $ATTEMPT of 5..."
+            HTTP_CODE=$(curl -sS -o /tmp/watchdog-dispatch.txt -w "%{http_code}" \
+              -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "$DISPATCH_URL" \
+              -d '{"ref":"main"}' || true)
+
+            if [[ "$HTTP_CODE" == "204" ]]; then
+              echo "KTMB monitor restarted successfully."
+              SUCCESS=1
+              break
+            fi
+
+            echo "Restart attempt failed with HTTP $HTTP_CODE."
+            cat /tmp/watchdog-dispatch.txt || true
+            sleep $((ATTEMPT * 10))
+          done
+
+          if [[ "$SUCCESS" -ne 1 ]]; then
+            echo "::error::Watchdog could not restart the KTMB monitor."
+            exit 1
+          fi
