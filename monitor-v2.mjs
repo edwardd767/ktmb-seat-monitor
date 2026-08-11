@@ -252,7 +252,7 @@ async function sendEmail(trains) {
     '',
     lines,
     '',
-    'Please open the official KTMB KITS website/app to book. Availability may change quickly.'
+    'Please open the official KTMB KITS website/app to book. CAUTION: QUICKLY BOOK FIRST WITHIN 2 MINS.'
   ].join('\n');
 
   await transporter.sendMail({ from, to, subject, text });
