@@ -1,127 +1,14 @@
-name: KTMB Seat Monitor
+name: KTMB Seat Monitor (Paused)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'monitor-v2.mjs'
-      - 'config.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/monitor.yml'
-
-permissions:
-  actions: write
-  contents: write
-
-concurrency:
-  group: ktmb-seat-monitor
-  cancel-in-progress: false
 
 jobs:
-  check-seats:
+  paused:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: Check KTMB seats
-        env:
-          SMTP_HOST: smtp.gmail.com
-          SMTP_PORT: '465'
-          SMTP_USER: edwardjacob721@gmail.com
-          SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          ALERT_EMAIL_TO: edwardjacob721@gmail.com
-          ALERT_EMAIL_FROM: edwardjacob721@gmail.com
-        run: npm run monitor
-
-      - name: Save alert state
-        if: success()
+      - name: KTMB monitor is paused
         run: |
-          if git diff --quiet -- .monitor-state.json; then
-            echo "No alert-state change."
-            exit 0
-          fi
-          git config user.name "KTMB Seat Monitor"
-          git config user.email "actions@users.noreply.github.com"
-          git add .monitor-state.json
-          git commit -m "chore: update KTMB alert state [skip ci]"
-          git pull --rebase
-          git push
-
-      - name: Upload debug files on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ktmb-monitor-debug
-          path: debug/
-          if-no-files-found: ignore
-          retention-days: 3
-
-      - name: Queue next KTMB check with retries
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TODAY=$(TZ=Asia/Kuala_Lumpur date +%F)
-          TRAVEL_DATE=$(node -p "require('./config.json').travelDate")
-
-          if [[ "$TODAY" > "$TRAVEL_DATE" ]]; then
-            echo "Travel date $TRAVEL_DATE has passed. Monitoring chain will stop."
-            exit 0
-          fi
-
-          DISPATCH_URL="https://api.github.com/repos/${{ github.repository }}/actions/workflows/monitor.yml/dispatches"
-          SUCCESS=0
-
-          for ATTEMPT in 1 2 3 4 5 6; do
-            echo "Dispatch attempt $ATTEMPT of 6..."
-            HTTP_CODE=$(curl -sS -o /tmp/dispatch-response.txt -w "%{http_code}" \
-              -X POST \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "$DISPATCH_URL" \
-              -d '{"ref":"main"}' || true)
-
-            if [[ "$HTTP_CODE" == "204" ]]; then
-              echo "Next KTMB check queued successfully."
-              SUCCESS=1
-              break
-            fi
-
-            echo "Dispatch failed with HTTP $HTTP_CODE."
-            cat /tmp/dispatch-response.txt || true
-
-            if [[ "$ATTEMPT" -lt 6 ]]; then
-              SLEEP_SECONDS=$((ATTEMPT * 10))
-              echo "Retrying in ${SLEEP_SECONDS}s..."
-              sleep "$SLEEP_SECONDS"
-            fi
-          done
-
-          if [[ "$SUCCESS" -ne 1 ]]; then
-            echo "::error::Could not queue the next KTMB check after 6 attempts. The watchdog workflow will recover the monitor."
-            exit 1
-          fi
-
-      - name: Keep current run alive for 5-minute cadence
-        if: always()
-        run: sleep 240
+          echo "KTMB Seat Monitor is currently paused."
+          echo "No KTMB seat checks are being performed and no alert emails will be sent."
+          echo "The repository and monitoring code have been kept for future use."
