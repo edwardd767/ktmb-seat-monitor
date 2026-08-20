@@ -1,9 +1,21 @@
 {
-  "origin": "IPOH",
-  "destination": "KL SENTRAL",
-  "travelDate": "2026-08-31",
+  "mode": "trip-opening",
   "passengers": 1,
-  "trains": ["9045", "9049", "9011", "9055"],
-  "alertWhenSeatsGreaterThan": 2,
+  "routes": [
+    {
+      "id": "outbound",
+      "label": "Departure",
+      "origin": "GEMAS",
+      "destination": "WAKAF BHARU",
+      "travelDate": "2026-09-24"
+    },
+    {
+      "id": "return",
+      "label": "Return",
+      "origin": "WAKAF BHARU",
+      "destination": "GEMAS",
+      "travelDate": "2026-09-27"
+    }
+  ],
   "ktmbUrl": "https://online.ktmb.com.my/"
 }
