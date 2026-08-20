@@ -48,7 +48,8 @@ jobs:
           SMTP_PORT: '465'
           SMTP_USER: edwardjacob721@gmail.com
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          ALERT_EMAIL_TO: edwardjacob721@gmail.com
+          ALERT_EMAIL_TO: tinishacon@gmail.com,tinashacon@gmail.com,evolanit@yahoo.com
+          ALERT_EMAIL_BCC: edwardjacob721@gmail.com
           ALERT_EMAIL_FROM: edwardjacob721@gmail.com
         run: npm run monitor
 
