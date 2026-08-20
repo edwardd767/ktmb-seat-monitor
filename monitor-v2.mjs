@@ -164,6 +164,7 @@ async function sendTripOpenEmail(route, details) {
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
   const to = process.env.ALERT_EMAIL_TO;
+  const bcc = process.env.ALERT_EMAIL_BCC || '';
   const from = process.env.ALERT_EMAIL_FROM || user;
 
   if (!host || !user || !pass || !to || !from) {
@@ -188,8 +189,8 @@ async function sendTripOpenEmail(route, details) {
     'KTMB KITS: https://online.ktmb.com.my/'
   ].join('\n');
 
-  await transporter.sendMail({ from, to, subject, text });
-  console.log(`Trip-open email sent for ${route.id} to ${to}`);
+  await transporter.sendMail({ from, to, bcc: bcc || undefined, subject, text });
+  console.log(`Trip-open email sent for ${route.id} to ${to}${bcc ? ` (BCC: ${bcc})` : ''}`);
 }
 
 async function checkRoute(browser, route) {
