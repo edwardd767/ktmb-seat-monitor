@@ -10,19 +10,36 @@ const STATE_PATH = path.join(ROOT, '.monitor-state.json');
 const DEBUG_DIR = path.join(ROOT, 'debug');
 
 const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-const threshold = Number(config.alertWhenSeatsGreaterThan ?? 3);
 
 function malaysiaDateISO() {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kuala_Lumpur',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
+    timeZone: 'Asia/Kuala_Lumpur', year: 'numeric', month: '2-digit', day: '2-digit'
   }).format(new Date());
+}
+
+function formatDate(iso) {
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
 }
 
 function normalizeText(value = '') {
   return String(value).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function loadState() {
+  try {
+    const state = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
+    return { notifiedRoutes: Array.isArray(state.notifiedRoutes) ? state.notifiedRoutes : [] };
+  } catch {
+    return { notifiedRoutes: [] };
+  }
+}
+
+function writeState(notifiedRoutes) {
+  fs.writeFileSync(
+    STATE_PATH,
+    JSON.stringify({ notifiedRoutes: [...new Set(notifiedRoutes)].sort() }, null, 2) + '\n'
+  );
 }
 
 async function selectStation(page, stationName, excludeIndex = -1) {
@@ -52,7 +69,7 @@ async function selectStation(page, stationName, excludeIndex = -1) {
 async function setDepartureDate(page, isoDate) {
   const [yearText, monthText, dayText] = isoDate.split('-');
   const targetYear = Number(yearText);
-  const targetMonth = Number(monthText); // 1-12
+  const targetMonth = Number(monthText);
   const targetDay = Number(dayText);
 
   const input = page.locator('#OnwardDate');
@@ -65,7 +82,6 @@ async function setDepartureDate(page, isoDate) {
   for (let attempt = 0; attempt < 24; attempt++) {
     const monthSelect = picker.locator('.lightpick__select-months');
     const yearSelect = picker.locator('.lightpick__select-years');
-
     const currentMonth = Number(await monthSelect.inputValue()) + 1;
     const currentYear = Number(await yearSelect.inputValue());
 
@@ -73,17 +89,11 @@ async function setDepartureDate(page, isoDate) {
 
     const currentIndex = currentYear * 12 + currentMonth;
     const targetIndex = targetYear * 12 + targetMonth;
-
-    if (targetIndex > currentIndex) {
-      await picker.locator('.lightpick__next-action').click();
-    } else {
-      await picker.locator('.lightpick__previous-action').click();
-    }
+    if (targetIndex > currentIndex) await picker.locator('.lightpick__next-action').click();
+    else await picker.locator('.lightpick__previous-action').click();
     await page.waitForTimeout(180);
 
-    if (attempt === 23) {
-      throw new Error(`Could not navigate KTMB calendar to ${isoDate}`);
-    }
+    if (attempt === 23) return false;
   }
 
   const target = picker
@@ -91,16 +101,11 @@ async function setDepartureDate(page, isoDate) {
     .filter({ hasText: new RegExp(`^${targetDay}$`) })
     .first();
 
-  if (!(await target.count())) {
-    throw new Error(`Date ${isoDate} is not selectable on KTMB calendar.`);
-  }
+  if (!(await target.count())) return false;
 
   await target.click();
   await page.waitForTimeout(400);
-
-  const selected = normalizeText(await input.inputValue());
-  if (!selected) throw new Error(`KTMB departure date remained blank after selecting ${isoDate}`);
-  console.log(`Departure date selected: ${selected}`);
+  return Boolean(normalizeText(await input.inputValue()));
 }
 
 async function clickSearch(page) {
@@ -119,107 +124,41 @@ async function clickSearch(page) {
   throw new Error('Could not find KTMB SEARCH button.');
 }
 
-function parseTrainBlock(raw) {
-  const text = normalizeText(raw);
-  const serviceMatch = text.match(/\b(Gold|Express|Platinum|Silver|Business)\s*-\s*(\d{3,5})\b/i);
-  if (!serviceMatch || !/MYR\s*[\d,.]+/i.test(text)) return null;
+async function detectTripStatus(page) {
+  await page.waitForTimeout(1400);
+  const bodyText = normalizeText(await page.locator('body').innerText().catch(() => ''));
 
-  const service = serviceMatch[1][0].toUpperCase() + serviceMatch[1].slice(1).toLowerCase();
-  const trainNumber = serviceMatch[2];
-  const times = [...text.matchAll(/\b([01]?\d|2[0-3]):[0-5]\d\b/g)].map(m => m[0]);
-  const fareMatch = text.match(/MYR\s*([\d,.]+)/i);
+  if (/NO\s+TRIPS?\s+FOUND/i.test(bodyText)) {
+    return { open: false, reason: 'NO TRIPS FOUND', details: [] };
+  }
 
-  // On the KTMB results row the available-seat number is the final standalone
-  // integer before the fare column.
-  const beforeFare = text.split(/MYR/i)[0];
-  const integers = [...beforeFare.matchAll(/\b\d+\b/g)].map(m => Number(m[0]));
-  if (!integers.length) return null;
-  const availableSeats = integers[integers.length - 1];
-
-  if (!Number.isFinite(availableSeats) || availableSeats < 0 || availableSeats > 999) return null;
-
-  return {
-    service,
-    trainNumber,
-    departure: times[0] || '',
-    arrival: times[1] || '',
-    availableSeats,
-    fare: fareMatch?.[1] || '',
-    raw: text
-  };
-}
-
-async function parseResults(page) {
-  await page.waitForTimeout(1200);
-
-  const blocks = await page.evaluate(() => {
+  const details = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('tr, [role="row"], .card, .row')];
     const results = [];
     const seen = new Set();
-
-    const rows = [...document.querySelectorAll('tr, [role="row"]')];
     for (const row of rows) {
       const text = (row.innerText || '').replace(/\s+/g, ' ').trim();
-      if (/MYR\s*[\d,.]+/i.test(text) && /(Gold|Express|Platinum|Silver|Business)\s*-\s*\d{3,5}/i.test(text)) {
-        if (!seen.has(text)) {
-          seen.add(text);
-          results.push(text);
-        }
+      if (!text) continue;
+      const looksLikeTrip = /MYR\s*[\d,.]+/i.test(text) || /PICK\s*SEATS?/i.test(text) || /AVAILABLE\s*SEATS?/i.test(text);
+      if (looksLikeTrip && !seen.has(text)) {
+        seen.add(text);
+        results.push(text.slice(0, 500));
       }
+      if (results.length >= 5) break;
     }
-
-    if (!results.length) {
-      const controls = [...document.querySelectorAll('button, a, input[type="button"], input[type="submit"]')];
-      const pickButtons = controls.filter(el => {
-        const text = `${el.innerText || ''} ${el.value || ''}`;
-        return /pick\s*seats/i.test(text);
-      });
-
-      for (const button of pickButtons) {
-        let node = button;
-        for (let depth = 0; depth < 10 && node; depth++, node = node.parentElement) {
-          const text = (node.innerText || '').replace(/\s+/g, ' ').trim();
-          if (/MYR\s*[\d,.]+/i.test(text) && /(Gold|Express|Platinum|Silver|Business)\s*-\s*\d{3,5}/i.test(text)) {
-            if (!seen.has(text)) {
-              seen.add(text);
-              results.push(text);
-            }
-            break;
-          }
-        }
-      }
-    }
-
     return results;
   });
 
-  const parsed = blocks.map(parseTrainBlock).filter(Boolean);
-  if (!parsed.length) {
-    const sample = normalizeText(await page.locator('body').innerText().catch(() => ''));
-    throw new Error(`No train rows parsed. Current URL: ${page.url()}. Page sample: ${sample.slice(0, 800)}`);
+  if (details.length) return { open: true, reason: 'Trip results found', details };
+
+  if (/MYR\s*[\d,.]+|PICK\s*SEATS?|AVAILABLE\s*SEATS?/i.test(bodyText)) {
+    return { open: true, reason: 'Trip indicators found', details: [] };
   }
 
-  return parsed;
+  return { open: false, reason: 'No trip result indicators found', details: [] };
 }
 
-function trainAllowed(train) {
-  if (config.trains === 'ALL' || config.trains == null) return true;
-  const allowed = Array.isArray(config.trains) ? config.trains.map(String) : [String(config.trains)];
-  return allowed.includes(String(train.trainNumber));
-}
-
-function loadState() {
-  try {
-    return JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
-  } catch {
-    return { activeAlerts: [] };
-  }
-}
-
-function writeState(activeAlerts) {
-  fs.writeFileSync(STATE_PATH, JSON.stringify({ activeAlerts }, null, 2) + '\n');
-}
-
-async function sendEmail(trains) {
+async function sendTripOpenEmail(route, details) {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT || 465);
   const user = process.env.SMTP_USER;
@@ -232,43 +171,28 @@ async function sendEmail(trains) {
   }
 
   const transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: { user, pass }
+    host, port, secure: port === 465, auth: { user, pass }
   });
 
-  const lines = trains.map(t =>
-    `${t.service} - ${t.trainNumber} | ${t.departure || '-'} → ${t.arrival || '-'} | ${t.availableSeats} seats | MYR ${t.fare || '-'}`
-  ).join('\n');
-
-  const subject = `[KTMB ALERT] Seats available: ${config.origin} → ${config.destination}`;
+  const subject = `[KTMB TRIP OPEN] ${route.origin} → ${route.destination} | ${formatDate(route.travelDate)}`;
   const text = [
-    'KTMB seat availability alert',
+    'KTMB trip opening alert',
     '',
-    `${config.origin} → ${config.destination}`,
-    `Travel date: ${config.travelDate}`,
-    `Alert condition: more than ${threshold} seats`,
+    `${route.label}: ${route.origin} → ${route.destination}`,
+    `Travel date: ${formatDate(route.travelDate)}`,
     '',
-    lines,
+    'The trip is now showing as available on the KTMB KITS website.',
+    'Please open KTMB KITS and make your booking as soon as possible.',
     '',
-    'Please open the official KTMB KITS website/app to book. CAUTION: QUICKLY BOOK FIRST WITHIN 2 MINS.'
+    ...(details.length ? ['Detected trip information:', ...details.slice(0, 3), ''] : []),
+    'KTMB KITS: https://online.ktmb.com.my/'
   ].join('\n');
 
   await transporter.sendMail({ from, to, subject, text });
-  console.log(`Alert email sent to ${to}`);
+  console.log(`Trip-open email sent for ${route.id} to ${to}`);
 }
 
-async function main() {
-  const today = malaysiaDateISO();
-  if (today > config.travelDate) {
-    console.log(`Travel date ${config.travelDate} has passed. Monitor is inactive.`);
-    return;
-  }
-
-  fs.mkdirSync(DEBUG_DIR, { recursive: true });
-
-  const browser = await chromium.launch({ headless: true });
+async function checkRoute(browser, route) {
   const page = await browser.newPage({
     locale: 'en-MY',
     timezoneId: 'Asia/Kuala_Lumpur',
@@ -277,60 +201,81 @@ async function main() {
   });
 
   try {
-    console.log(`Checking KTMB: ${config.origin} -> ${config.destination}, ${config.travelDate}`);
+    console.log(`Checking ${route.label}: ${route.origin} -> ${route.destination}, ${route.travelDate}`);
     await page.goto(config.ktmbUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
     await page.waitForTimeout(1000);
 
-    const originIndex = await selectStation(page, config.origin);
-    await selectStation(page, config.destination, originIndex);
-    await setDepartureDate(page, config.travelDate);
+    const originIndex = await selectStation(page, route.origin);
+    await selectStation(page, route.destination, originIndex);
 
-    console.log('Submitting KTMB search...');
+    const dateSelectable = await setDepartureDate(page, route.travelDate);
+    if (!dateSelectable) {
+      console.log(`${route.id}: date is not selectable yet; treating as not open.`);
+      return { open: false, reason: 'Date not selectable yet', details: [] };
+    }
+
     await clickSearch(page);
-
     await Promise.race([
       page.waitForURL(/\/Trip/i, { timeout: 30000 }),
+      page.getByText(/NO\s+TRIPS?\s+FOUND/i).first().waitFor({ state: 'visible', timeout: 30000 }),
       page.getByText(/Available\s+seats/i).first().waitFor({ state: 'visible', timeout: 30000 })
     ]).catch(() => {});
 
     await page.waitForLoadState('domcontentloaded').catch(() => {});
-    await page.waitForTimeout(1500);
-    console.log(`Results URL: ${page.url()}`);
-
-    const trains = (await parseResults(page)).filter(trainAllowed);
-    if (!trains.length) throw new Error('KTMB returned results, but none matched the configured train numbers.');
-
-    console.table(trains.map(t => ({
-      train: `${t.service} - ${t.trainNumber}`,
-      departure: t.departure,
-      arrival: t.arrival,
-      seats: t.availableSeats,
-      fare: t.fare
-    })));
-
-    const qualifying = trains.filter(t => t.availableSeats > threshold);
-    const previous = new Set((loadState().activeAlerts || []).map(String));
-    const activeNow = qualifying.map(t => String(t.trainNumber)).sort();
-    const newAlerts = qualifying.filter(t => !previous.has(String(t.trainNumber)));
-
-    if (newAlerts.length) {
-      console.log(`Threshold crossed by train(s): ${newAlerts.map(t => t.trainNumber).join(', ')}`);
-      await sendEmail(newAlerts);
-    } else if (qualifying.length) {
-      console.log('Availability is above the threshold, but an alert was already sent for the current condition.');
-    } else {
-      console.log(`No monitored train currently has more than ${threshold} seats.`);
-    }
-
-    writeState(activeNow);
+    const status = await detectTripStatus(page);
+    console.log(`${route.id}: ${status.open ? 'OPEN' : 'NOT OPEN'} - ${status.reason}`);
+    return status;
   } catch (error) {
-    console.error(error?.stack || error);
-    try { await page.screenshot({ path: path.join(DEBUG_DIR, 'ktmb-failure.png'), fullPage: true }); } catch {}
-    try { fs.writeFileSync(path.join(DEBUG_DIR, 'ktmb-page.html'), await page.content(), 'utf8'); } catch {}
+    const safeId = route.id.replace(/[^a-z0-9_-]/gi, '_');
+    try { await page.screenshot({ path: path.join(DEBUG_DIR, `${safeId}-failure.png`), fullPage: true }); } catch {}
+    try { fs.writeFileSync(path.join(DEBUG_DIR, `${safeId}-page.html`), await page.content(), 'utf8'); } catch {}
     throw error;
   } finally {
-    await browser.close();
+    await page.close();
   }
 }
 
-main().catch(() => process.exit(1));
+async function main() {
+  const routes = Array.isArray(config.routes) ? config.routes : [];
+  if (!routes.length) throw new Error('No routes configured in config.json');
+
+  const today = malaysiaDateISO();
+  const lastTravelDate = routes.map(r => r.travelDate).sort().at(-1);
+  if (today > lastTravelDate) {
+    console.log(`All configured travel dates have passed. Monitor is inactive.`);
+    return;
+  }
+
+  fs.mkdirSync(DEBUG_DIR, { recursive: true });
+  const state = loadState();
+  const notified = new Set(state.notifiedRoutes.map(String));
+
+  const browser = await chromium.launch({ headless: true });
+  try {
+    for (const route of routes) {
+      if (notified.has(route.id)) {
+        console.log(`${route.id}: already notified; skipping.`);
+        continue;
+      }
+
+      const status = await checkRoute(browser, route);
+      if (status.open) {
+        await sendTripOpenEmail(route, status.details);
+        notified.add(route.id);
+      }
+    }
+  } finally {
+    await browser.close();
+  }
+
+  writeState([...notified]);
+
+  const allNotified = routes.every(route => notified.has(route.id));
+  if (allNotified) console.log('ALL_CONFIGURED_TRIPS_OPEN_AND_NOTIFIED');
+  else console.log('Monitoring will continue for trip(s) not opened yet.');
+}
+
+main().catch(error => {
+  console.error(error?.stack || error);
+  process.exit(1);
+});
