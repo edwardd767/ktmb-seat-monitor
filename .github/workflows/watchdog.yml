@@ -1,99 +1,14 @@
-name: KTMB Trip Opening Watchdog
+name: KTMB Trip Opening Watchdog (Paused)
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '7,17,27,37,47,57 * * * *'
-
-permissions:
-  actions: write
-  contents: read
-
-concurrency:
-  group: ktmb-seat-monitor-watchdog
-  cancel-in-progress: true
 
 jobs:
-  restart-if-stalled:
+  paused:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Stop watchdog after both trip alerts are sent
-        id: gate
+      - name: KTMB watchdog is paused
         run: |
-          TODAY=$(TZ=Asia/Kuala_Lumpur date +%F)
-          LAST_TRAVEL_DATE=$(node -e "const c=require('./config.json'); console.log(c.routes.map(r=>r.travelDate).sort().at(-1))")
-          ALL_NOTIFIED=$(node -e "const c=require('./config.json'); const s=require('./.monitor-state.json'); const n=new Set(s.notifiedRoutes||[]); console.log(c.routes.every(r=>n.has(r.id))?'yes':'no')")
-
-          if [[ "$TODAY" > "$LAST_TRAVEL_DATE" || "$ALL_NOTIFIED" == "yes" ]]; then
-            echo "monitor_required=no" >> "$GITHUB_OUTPUT"
-            echo "Monitoring is no longer required."
-          else
-            echo "monitor_required=yes" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Check monitor health and restart if needed
-        if: steps.gate.outputs.monitor_required == 'yes'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          RUNS_URL="https://api.github.com/repos/${{ github.repository }}/actions/workflows/monitor.yml/runs?branch=main&per_page=5"
-          DISPATCH_URL="https://api.github.com/repos/${{ github.repository }}/actions/workflows/monitor.yml/dispatches"
-
-          RESPONSE=$(curl -fsSL \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "$RUNS_URL")
-
-          LATEST_CREATED=$(echo "$RESPONSE" | jq -r '.workflow_runs[0].created_at // empty')
-          NEED_RESTART=0
-
-          if [[ -z "$LATEST_CREATED" ]]; then
-            NEED_RESTART=1
-          else
-            NOW_EPOCH=$(date -u +%s)
-            LATEST_EPOCH=$(date -u -d "$LATEST_CREATED" +%s)
-            AGE_SECONDS=$((NOW_EPOCH - LATEST_EPOCH))
-            echo "Latest monitor run age: ${AGE_SECONDS}s"
-            if [[ "$AGE_SECONDS" -gt 720 ]]; then
-              NEED_RESTART=1
-            fi
-          fi
-
-          if [[ "$NEED_RESTART" -eq 0 ]]; then
-            echo "Trip-opening monitor is healthy."
-            exit 0
-          fi
-
-          SUCCESS=0
-          for ATTEMPT in 1 2 3 4 5; do
-            echo "Watchdog dispatch attempt $ATTEMPT of 5..."
-            HTTP_CODE=$(curl -sS -o /tmp/watchdog-dispatch.txt -w "%{http_code}" \
-              -X POST \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "$DISPATCH_URL" \
-              -d '{"ref":"main"}' || true)
-
-            if [[ "$HTTP_CODE" == "204" ]]; then
-              echo "Trip-opening monitor restarted successfully."
-              SUCCESS=1
-              break
-            fi
-
-            cat /tmp/watchdog-dispatch.txt || true
-            sleep $((ATTEMPT * 10))
-          done
-
-          if [[ "$SUCCESS" -ne 1 ]]; then
-            echo "::error::Watchdog could not restart the trip-opening monitor."
-            exit 1
-          fi
+          echo "KTMB Trip Opening Watchdog is currently paused."
+          echo "It will not restart the KTMB monitoring service automatically."
+          echo "The repository and watchdog code history have been kept for future use."
